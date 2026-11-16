@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "currytruck"
-version = "0.1.0"
+version = "2026.11.16"
 description = "Finding the best solution, one ingredient at a time — a pure Python optimization toolkit."
 readme = "README.md"
 license = "MIT"
@@ -69,3 +69,4 @@ packages = ["src/currytruck"]
 [tool.pytest.ini_options]
 testpaths = ["tests", "src"]
 addopts = "--doctest-modules"
+pythonpath = ["src"]

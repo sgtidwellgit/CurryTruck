@@ -19,7 +19,7 @@ from currytruck.exceptions import (
     EmptySpaceError,
 )
 
-__version__ = "0.1.0"
+__version__ = "2026.11.16"
 
 __all__ = [
     # modules

@@ -1,6 +1,6 @@
 # CurryTruck — Project Document
 
-> **Current version:** 0.1.0 | **PyPI:** `pip install currytruck` | **Python:** ≥ 3.9 | **Dependencies:** none
+> **Current version:** 2026.11.16 | **PyPI:** `pip install currytruck` | **Python:** ≥ 3.9 | **Dependencies:** none
 
 **Tagline:** Finding the best solution, one ingredient at a time.
 
@@ -32,7 +32,7 @@ for layout, dependency map, and conventions.
 | ⚖️ `balance` | Multi-objective optimization | `dominates`, `pareto_front`, `pareto_rank`, `crowding_distance`, `pareto_search` |
 | 🚚 `serve` | Results and reporting | `rank`, `best`, `convergence`, `report`, `leaderboard` |
 
-### Scope decisions (0.1.0)
+### Scope decisions (2026.11.16)
 
 - **Zero dependencies.** numpy would speed up `linprog` and the population
   methods, but every algorithm here runs fine at the problem sizes a pure
@@ -60,7 +60,7 @@ One test file per module, mirroring the source layout, plus
 
 ```bash
 pip install -e ".[dev]"
-pytest               # 193 tests as of 0.1.0
+pytest               # 193 tests as of 2026.11.16
 ```
 
 CI (`.github/workflows/tests.yml`) runs on Python 3.9–3.13 on Ubuntu, plus
@@ -76,12 +76,19 @@ twine check dist/*         # verify package metadata
 twine upload dist/*        # publish to PyPI
 ```
 
+Versions are the release date, `YYYY.MM.DD` (e.g. `2026.11.16`). A second
+release on the same day appends a counter: `2026.11.16.1`. Don't zero-pad
+the month or day — PyPI normalizes `2026.01.05` to `2026.1.5` anyway.
+
 Bump the version in exactly two places before each release:
-- `pyproject.toml` → `version = "x.y.z"`
-- `src/currytruck/__init__.py` → `__version__ = "x.y.z"`
+- `pyproject.toml` → `version = "YYYY.MM.DD"`
+- `src/currytruck/__init__.py` → `__version__ = "YYYY.MM.DD"`
 
 Move the `[Unreleased]` section of `CHANGELOG.md` under a new
-`[x.y.z] - date` heading as part of the same release.
+`[YYYY.MM.DD]` heading as part of the same release.
+
+The first upload went out as `0.1.0` before the date scheme was adopted;
+date versions sort above it, so `pip install currytruck` picks them up.
 
 ---
 
