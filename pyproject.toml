@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "currytruck"
-version = "2026.11.16"
+version = "2026.11.18"
 description = "Finding the best solution, one ingredient at a time — a pure Python optimization toolkit."
 readme = "README.md"
 license = "MIT"
@@ -19,6 +19,13 @@ keywords = [
     "knapsack",
     "constraint-satisfaction",
     "pareto",
+    "nsga2",
+    "particle-swarm",
+    "tabu-search",
+    "integer-programming",
+    "vehicle-routing",
+    "scheduling",
+    "portfolio",
     "gradient-descent",
     "hyperparameter-search",
 ]
@@ -46,6 +53,7 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "pytest-cov"]
+plot = ["matplotlib>=3.5"]
 
 [project.urls]
 Homepage = "https://github.com/sgtidwellgit/CurryTruck"

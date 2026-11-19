@@ -1,8 +1,16 @@
 import itertools
+import math
 import random
 
 import pytest
-from currytruck import knapsack, best_subset, InfeasibleError, EmptySpaceError
+from currytruck import (
+    knapsack,
+    best_subset,
+    shortest_route,
+    vehicle_routes,
+    InfeasibleError,
+    EmptySpaceError,
+)
 
 
 def brute_knapsack(values, weights, cap):
@@ -100,3 +108,148 @@ class TestBestSubset:
     def test_bad_range(self):
         with pytest.raises(ValueError):
             best_subset([1, 2], sum, size=5)
+
+
+def brute_route(d, start, closed):
+    n = len(d)
+    best = None
+    for perm in itertools.permutations([i for i in range(n) if i != start]):
+        tour = [start, *perm]
+        length = sum(d[tour[i]][tour[i + 1]] for i in range(n - 1))
+        if closed:
+            length += d[tour[-1]][start]
+        best = length if best is None else min(best, length)
+    return best
+
+
+def random_matrix(rng, n, symmetric=True):
+    d = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(n):
+            if i != j:
+                d[i][j] = d[j][i] if symmetric and j < i else rng.uniform(1, 100)
+    return d
+
+
+class TestShortestRoute:
+    @pytest.mark.parametrize("seed", range(6))
+    @pytest.mark.parametrize("closed", [True, False])
+    def test_exact_matches_brute_force(self, seed, closed):
+        rng = random.Random(seed)
+        d = random_matrix(rng, 7, symmetric=seed % 2 == 0)
+        r = shortest_route(d, start=seed % 7, closed=closed)
+        assert r.extra["exact"]
+        assert r.score == pytest.approx(brute_route(d, seed % 7, closed))
+        assert r.x[0] == seed % 7 and sorted(r.x) == list(range(7))
+
+    def test_heuristic_on_circle_is_optimal(self):
+        n = 40
+        pts = [(math.cos(2 * math.pi * k / n), math.sin(2 * math.pi * k / n)) for k in range(n)]
+        rng = random.Random(0)
+        order = list(range(n))
+        rng.shuffle(order)
+        r = shortest_route(points=[pts[i] for i in order])
+        assert not r.extra["exact"]
+        assert r.score == pytest.approx(2 * n * math.sin(math.pi / n))
+
+    def test_heuristic_close_to_exact(self):
+        rng = random.Random(5)
+        pts = [(rng.uniform(0, 10), rng.uniform(0, 10)) for _ in range(10)]
+        exact = shortest_route(points=pts)
+        heuristic = shortest_route(points=pts, exact_limit=0)
+        assert heuristic.score <= exact.score * 1.1
+
+    def test_asymmetric_heuristic_valid(self):
+        d = random_matrix(random.Random(2), 15, symmetric=False)
+        r = shortest_route(d)
+        assert sorted(r.x) == list(range(15))
+
+    def test_tiny(self):
+        assert shortest_route([[0]]).x == [0]
+        assert shortest_route([[0, 3], [4, 0]]).score == 7
+
+    def test_errors(self):
+        with pytest.raises(ValueError):
+            shortest_route()
+        with pytest.raises(ValueError):
+            shortest_route([[0, 1]])
+        with pytest.raises(IndexError):
+            shortest_route([[0, 1], [1, 0]], start=5)
+        with pytest.raises(EmptySpaceError):
+            shortest_route([])
+
+
+def assert_valid_plan(r, n, depot, demands, capacity):
+    served = [c for route in r.x for c in route]
+    assert sorted(served) == [i for i in range(n) if i != depot]
+    for route in r.x:
+        assert sum(demands[c] for c in route) <= capacity + 1e-9
+
+
+class TestVehicleRoutes:
+    def test_capacity(self):
+        rng = random.Random(0)
+        pts = [(5, 5)] + [(rng.uniform(0, 10), rng.uniform(0, 10)) for _ in range(25)]
+        demands = [0] + [rng.randint(1, 5) for _ in range(25)]
+        r = vehicle_routes(points=pts, demands=demands, capacity=15)
+        assert_valid_plan(r, 26, 0, demands, 15)
+        assert r.score == pytest.approx(sum(r.extra["distances"]))
+        assert len(r.x) >= math.ceil(sum(demands) / 15)
+
+    def test_beats_one_truck_per_stop(self):
+        rng = random.Random(1)
+        pts = [(0, 0)] + [(rng.uniform(5, 10), rng.uniform(5, 10)) for _ in range(10)]
+        r = vehicle_routes(points=pts, demands=[0] + [1] * 10, capacity=5)
+        naive = sum(2 * math.dist(pts[0], p) for p in pts[1:])
+        assert r.score < naive / 2
+
+    def test_time_windows_respected(self):
+        pts = [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0)]
+        windows = [(0, 100), (0, 2), (10, 12), (0, 100), (0, 100)]
+        r = vehicle_routes(points=pts, demands=[0, 1, 1, 1, 1], capacity=10, time_windows=windows,
+                           service_times=1)
+        for route, arrivals in zip(r.x, r.extra["arrivals"]):
+            for c, t in zip(route, arrivals):
+                assert windows[c][0] <= t <= windows[c][1]
+
+    def test_conflicting_windows_split_routes(self):
+        # two stops far apart, both must be reached by t=5
+        pts = [(0, 0), (4, 0), (-4, 0)]
+        r = vehicle_routes(points=pts, demands=[0, 1, 1], capacity=10,
+                           time_windows=[None, (0, 5), (0, 5)])
+        assert len(r.x) == 2
+
+    def test_fleet_limit(self):
+        pts = [(0, 0), (1, 0), (2, 0), (3, 0)]
+        with pytest.raises(InfeasibleError):
+            vehicle_routes(points=pts, demands=[0, 2, 2, 2], capacity=2, n_vehicles=2)
+        r = vehicle_routes(points=pts, demands=[0, 2, 2, 2], capacity=2, n_vehicles=3)
+        assert len(r.x) == 3
+
+    def test_demand_over_capacity(self):
+        with pytest.raises(InfeasibleError):
+            vehicle_routes(points=[(0, 0), (1, 1)], demands=[0, 5], capacity=4)
+
+    def test_unreachable_window(self):
+        with pytest.raises(InfeasibleError):
+            vehicle_routes(points=[(0, 0), (10, 0)], demands=[0, 1], capacity=4,
+                           time_windows=[None, (0, 5)])
+
+    def test_depot_day_length(self):
+        with pytest.raises(InfeasibleError):
+            vehicle_routes(points=[(0, 0), (10, 0)], demands=[0, 1], capacity=4,
+                           time_windows=[(0, 15), None])
+
+    def test_non_zero_depot(self):
+        pts = [(1, 0), (0, 0), (2, 0)]
+        r = vehicle_routes(points=pts, demands=[1, 0, 1], capacity=5, depot=1)
+        assert_valid_plan(r, 3, 1, [1, 0, 1], 5)
+        assert r.score == pytest.approx(4.0)
+
+    def test_errors(self):
+        with pytest.raises(ValueError):
+            vehicle_routes(points=[(0, 0), (1, 1)], demands=[0], capacity=1)
+        with pytest.raises(ValueError):
+            vehicle_routes(points=[(0, 0), (1, 1)], demands=[0, 1], capacity=1, service_times=[1])
+        with pytest.raises(IndexError):
+            vehicle_routes(points=[(0, 0)], demands=[0], capacity=1, depot=3)

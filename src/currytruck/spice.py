@@ -6,37 +6,79 @@ best. The objective is called with each parameter set as keyword arguments.
 
 from __future__ import annotations
 
+import functools
 import itertools
 import random
-from typing import Any, Callable, Mapping, Optional
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from typing import Any, Callable, Iterable, Iterator, Mapping, Optional
 
 from currytruck.exceptions import EmptySpaceError
 from currytruck.result import Result
+
+Callback = Callable[[int, Any, float], Optional[bool]]
 
 
 def _better(a: float, b: float, maximize: bool) -> bool:
     return a > b if maximize else a < b
 
 
+def _call_with_kwargs(objective: Callable[..., float], params: dict[str, Any]) -> float:
+    return float(objective(**params))
+
+
+def _chunks(items: Iterable[Any], size: int) -> Iterator[list[Any]]:
+    it = iter(items)
+    while True:
+        chunk = list(itertools.islice(it, size))
+        if not chunk:
+            return
+        yield chunk
+
+
 def _run_trials(
     objective: Callable[..., float],
-    candidates: Any,
+    candidates: Iterable[dict[str, Any]],
     maximize: bool,
     method: str,
     keep_trials: bool,
+    workers: Optional[int],
+    backend: str,
+    callback: Optional[Callback],
 ) -> Result:
+    if backend not in ("thread", "process"):
+        raise ValueError(f"backend must be 'thread' or 'process', got {backend!r}")
+    if workers is not None and workers < 1:
+        raise ValueError(f"workers must be >= 1, got {workers}")
+
     best_params: Optional[dict[str, Any]] = None
     best_score = 0.0
     history: list[float] = []
     trials: list[tuple[dict[str, Any], float]] = []
+    stopped = False
+    evaluate = functools.partial(_call_with_kwargs, objective)
 
-    for params in candidates:
-        score = float(objective(**params))
-        if keep_trials:
-            trials.append((params, score))
-        if best_params is None or _better(score, best_score, maximize):
-            best_params, best_score = params, score
-        history.append(best_score)
+    pool = None
+    if workers is not None and workers > 1:
+        pool = (ThreadPoolExecutor if backend == "thread" else ProcessPoolExecutor)(max_workers=workers)
+    try:
+        # Evaluate in chunks so a callback can stop a parallel run early
+        chunk_size = workers * 4 if pool is not None else 1
+        for chunk in _chunks(candidates, chunk_size):
+            scores = list(pool.map(evaluate, chunk)) if pool is not None else [evaluate(chunk[0])]
+            for params, score in zip(chunk, scores):
+                if keep_trials:
+                    trials.append((params, score))
+                if best_params is None or _better(score, best_score, maximize):
+                    best_params, best_score = params, score
+                history.append(best_score)
+                if callback is not None and callback(len(history), best_params, best_score):
+                    stopped = True
+                    break
+            if stopped:
+                break
+    finally:
+        if pool is not None:
+            pool.shutdown()
 
     if best_params is None:
         raise EmptySpaceError("Search space produced no candidates")
@@ -48,8 +90,8 @@ def _run_trials(
         history=history,
         n_evals=len(history),
         n_iter=len(history),
-        converged=True,
-        message=f"Evaluated {len(history)} candidates",
+        converged=not stopped,
+        message="Stopped by callback" if stopped else f"Evaluated {len(history)} candidates",
         method=method,
         extra={"trials": trials} if keep_trials else {},
     )
@@ -61,6 +103,9 @@ def grid_search(
     *,
     maximize: bool = False,
     keep_trials: bool = True,
+    workers: Optional[int] = None,
+    backend: str = "thread",
+    callback: Optional[Callback] = None,
 ) -> Result:
     """Exhaustively evaluate every combination of parameter values.
 
@@ -74,6 +119,17 @@ def grid_search(
         If ``True``, higher scores are better. Default minimizes.
     keep_trials:
         Store every ``(params, score)`` pair in ``result.extra["trials"]``.
+    workers:
+        Evaluate candidates in parallel with this many workers. Results are
+        identical to a serial run.
+    backend:
+        ``"thread"`` (default — best when the objective releases the GIL, e.g.
+        numpy / ML training / I/O) or ``"process"`` (pure Python CPU-bound
+        objectives; the objective must be picklable, i.e. a module-level
+        function, not a lambda).
+    callback:
+        ``callback(iteration, best_params, best_score)`` after each
+        evaluation; return ``True`` to stop early.
 
     Examples
     --------
@@ -90,7 +146,9 @@ def grid_search(
             raise EmptySpaceError(f"Parameter {name!r} has no values")
 
     candidates = (dict(zip(names, combo)) for combo in itertools.product(*value_lists))
-    return _run_trials(objective, candidates, maximize, "grid_search", keep_trials)
+    return _run_trials(
+        objective, candidates, maximize, "grid_search", keep_trials, workers, backend, callback
+    )
 
 
 def _sampler(name: str, spec: Any) -> Callable[[random.Random], Any]:
@@ -120,6 +178,9 @@ def random_search(
     maximize: bool = False,
     seed: Optional[int] = None,
     keep_trials: bool = True,
+    workers: Optional[int] = None,
+    backend: str = "thread",
+    callback: Optional[Callback] = None,
 ) -> Result:
     """Evaluate ``n_iter`` randomly sampled parameter sets.
 
@@ -140,9 +201,12 @@ def random_search(
     maximize:
         If ``True``, higher scores are better. Default minimizes.
     seed:
-        Seed for reproducible sampling.
+        Seed for reproducible sampling. Sampling happens in the calling
+        thread, so a seeded run gives the same result with any ``workers``.
     keep_trials:
         Store every ``(params, score)`` pair in ``result.extra["trials"]``.
+    workers, backend, callback:
+        As for :func:`grid_search`.
     """
     if not space:
         raise EmptySpaceError("Search space is empty")
@@ -153,4 +217,6 @@ def random_search(
     candidates = (
         {name: sample(rng) for name, sample in samplers.items()} for _ in range(n_iter)
     )
-    return _run_trials(objective, candidates, maximize, "random_search", keep_trials)
+    return _run_trials(
+        objective, candidates, maximize, "random_search", keep_trials, workers, backend, callback
+    )

@@ -80,3 +80,48 @@ class TestRandomSearch:
     def test_reversed_bounds(self):
         with pytest.raises(ValueError):
             random_search(lambda x: x, {"x": (5, 1)})
+
+
+def slow_square(x):
+    return (x - 3) ** 2
+
+
+class TestParallelAndCallbacks:
+    def test_thread_workers_same_result(self):
+        space = {"x": (-10.0, 10.0), "y": [1, 2, 3]}
+
+        def f(x, y):
+            return (x - y) ** 2
+
+        serial = random_search(f, space, n_iter=60, seed=4)
+        parallel = random_search(f, space, n_iter=60, seed=4, workers=4)
+        assert serial.x == parallel.x and serial.history == parallel.history
+
+    def test_process_backend(self):
+        r = grid_search(slow_square, {"x": range(7)}, workers=2, backend="process")
+        assert r.x == {"x": 3}
+        assert r.n_evals == 7
+
+    def test_callback_stops(self):
+        seen = []
+
+        def cb(i, params, score):
+            seen.append(i)
+            return i == 5
+
+        r = grid_search(lambda x: x, {"x": range(100)}, callback=cb)
+        assert r.n_evals == 5 and seen[-1] == 5
+        assert not r.converged and r.message == "Stopped by callback"
+
+    def test_callback_stops_parallel_run_early(self):
+        r = random_search(lambda x: x, {"x": (0.0, 1.0)}, n_iter=1000, workers=2,
+                          callback=lambda i, p, s: i >= 10)
+        assert r.n_evals == 10
+
+    def test_bad_backend(self):
+        with pytest.raises(ValueError):
+            grid_search(lambda x: x, {"x": [1]}, backend="gpu")
+
+    def test_bad_workers(self):
+        with pytest.raises(ValueError):
+            grid_search(lambda x: x, {"x": [1]}, workers=0)

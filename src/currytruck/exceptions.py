@@ -19,3 +19,11 @@ class UnboundedError(CurryTruckError, ValueError):
 
 class EmptySpaceError(CurryTruckError, ValueError):
     """Raised when a search space or candidate set has nothing to evaluate."""
+
+
+class SearchBudgetExceeded(CurryTruckError, RuntimeError):
+    """Raised when a search hits its node budget before finding any solution.
+
+    Unlike the other exceptions this is a ``RuntimeError``, not a
+    ``ValueError`` — the problem may well be solvable with a larger budget.
+    """

@@ -1,5 +1,5 @@
 import pytest
-from currytruck import gradient_descent, numerical_gradient
+from currytruck import gradient_descent, adam, rmsprop, numerical_gradient
 from currytruck.taste import rosenbrock, sphere
 
 
@@ -54,3 +54,61 @@ class TestGradientDescent:
     def test_bad_args(self, kw):
         with pytest.raises(ValueError):
             gradient_descent(sphere, [1.0], **kw)
+
+
+def ill_conditioned(v):
+    return (v[0] - 3) ** 2 + 1000 * (v[1] + 1) ** 2
+
+
+class TestAdaptiveMethods:
+    def test_adam_ill_conditioned(self):
+        r = adam(ill_conditioned, [0.0, 0.0], lr=0.05, max_iter=5000)
+        assert r.x == pytest.approx([3.0, -1.0], abs=1e-2)
+        assert r.method == "adam"
+
+    def test_rmsprop(self):
+        r = rmsprop(ill_conditioned, [0.0, 0.0], lr=0.01, max_iter=5000)
+        assert r.x == pytest.approx([3.0, -1.0], abs=2e-2)
+
+    def test_adam_maximize_and_bounds(self):
+        r = adam(lambda v: -((v[0] - 5) ** 2), [0.0], lr=0.1, bounds=[(None, 2.0)],
+                 maximize=True, max_iter=2000)
+        assert r.x[0] == pytest.approx(2.0)
+
+    @pytest.mark.parametrize("kw", [{"lr": -1}, {"beta1": 1.0}, {"beta2": 1.5}])
+    def test_adam_bad_args(self, kw):
+        with pytest.raises(ValueError):
+            adam(sphere, [1.0], **kw)
+
+    def test_rmsprop_bad_rho(self):
+        with pytest.raises(ValueError):
+            rmsprop(sphere, [1.0], rho=1.0)
+
+
+class TestLineSearch:
+    def test_rescues_too_large_lr(self):
+        plain = gradient_descent(ill_conditioned, [0.0, 0.0], lr=0.5, max_iter=200)
+        searched = gradient_descent(ill_conditioned, [0.0, 0.0], lr=0.5, line_search=True,
+                                    max_iter=20_000)
+        assert not plain.converged
+        assert searched.x == pytest.approx([3.0, -1.0], abs=1e-4)
+
+    def test_monotone_decrease(self):
+        r = gradient_descent(rosenbrock, [-1.2, 1.0], lr=1.0, line_search=True, max_iter=500)
+        assert all(b <= a + 1e-12 for a, b in zip(r.history, r.history[1:]))
+
+    def test_not_with_momentum(self):
+        with pytest.raises(ValueError):
+            gradient_descent(sphere, [1.0], line_search=True, momentum=0.5)
+
+
+class TestCallback:
+    def test_stops(self):
+        r = gradient_descent(sphere, [10.0], lr=0.01, callback=lambda i, x, s: i == 3)
+        assert r.n_iter == 3 and r.message == "Stopped by callback" and not r.converged
+
+    def test_receives_user_sense_score(self):
+        scores = []
+        gradient_descent(lambda v: -(v[0] ** 2), [1.0], lr=0.1, maximize=True, max_iter=5,
+                         callback=lambda i, x, s: scores.append(s))
+        assert scores and all(s <= 0 for s in scores)

@@ -1,5 +1,6 @@
 import pytest
 from currytruck import Result, rank, best, convergence, report, leaderboard, EmptySpaceError
+from currytruck import plot_convergence, plot_pareto
 
 
 def make(score, maximize=False, method="m", history=None):
@@ -66,3 +67,46 @@ class TestText:
         lines = text.splitlines()
         assert len(lines) == 3
         assert "a" in lines[1] and "b" in lines[2]
+
+
+class TestPlotting:
+    @pytest.fixture(autouse=True)
+    def _agg(self):
+        matplotlib = pytest.importorskip("matplotlib")
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        yield
+        plt.close("all")
+
+    def test_convergence_single(self):
+        ax = plot_convergence(make(1, history=[5, 3, 1]))
+        assert len(ax.lines) == 1
+        assert list(ax.lines[0].get_ydata()) == [5, 3, 1]
+        assert ax.get_legend() is None
+
+    def test_convergence_many_with_labels_and_log(self):
+        runs = [make(1, method="a", history=[4, 2, 1]), make(2, method="b", history=[8, 2])]
+        ax = plot_convergence(runs, log=True)
+        assert [t.get_text() for t in ax.get_legend().get_texts()] == ["a", "b"]
+        assert ax.get_yscale() == "log"
+
+    def test_convergence_onto_existing_axes(self):
+        import matplotlib.pyplot as plt
+
+        _, ax = plt.subplots()
+        assert plot_convergence(make(1, history=[1]), ax=ax) is ax
+
+    def test_convergence_label_mismatch(self):
+        with pytest.raises(ValueError):
+            plot_convergence([make(1)], labels=["a", "b"])
+
+    def test_pareto(self):
+        pts = [(1, 5), (2, 2), (3, 3), (5, 1)]
+        ax = plot_pareto(pts, front=[0, 1, 3], labels=("cost", "time"))
+        assert ax.get_xlabel() == "cost"
+        assert list(ax.lines[0].get_xdata()) == [1, 2, 5]
+
+    def test_pareto_needs_two_objectives(self):
+        with pytest.raises(ValueError):
+            plot_pareto([(1, 2, 3)])

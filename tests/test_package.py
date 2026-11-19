@@ -2,6 +2,7 @@ import importlib
 
 import currytruck
 from currytruck import CurryTruckError, InvalidHeatLevel, InfeasibleError, UnboundedError, EmptySpaceError
+from currytruck import SearchBudgetExceeded
 
 
 def test_version_matches_pyproject():
@@ -26,6 +27,8 @@ def test_exception_hierarchy():
     for exc in (InvalidHeatLevel, InfeasibleError, UnboundedError, EmptySpaceError):
         assert issubclass(exc, CurryTruckError)
         assert issubclass(exc, ValueError)
+    assert issubclass(SearchBudgetExceeded, CurryTruckError)
+    assert issubclass(SearchBudgetExceeded, RuntimeError)
 
 
 def test_result_better_than():

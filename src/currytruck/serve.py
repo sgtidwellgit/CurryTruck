@@ -1,12 +1,13 @@
 """serve — results and reporting: rankings and convergence statistics.
 
 Plate it up: compare runs, see how fast each one got there, and print a
-readable summary.
+readable summary. Plotting needs the optional ``plot`` extra
+(``pip install currytruck[plot]``).
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional, Sequence
+from typing import Any, Optional, Sequence, Union
 
 from currytruck.exceptions import EmptySpaceError
 from currytruck.result import Result
@@ -155,3 +156,91 @@ def leaderboard(results: Sequence[Result], *, top: Optional[int] = None) -> str:
         ]
         lines.append("  ".join(cells).rstrip())
     return "\n".join(lines)
+
+
+def _pyplot() -> Any:
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as exc:  # pragma: no cover - exercised only without matplotlib
+        raise ImportError(
+            "Plotting needs matplotlib: pip install currytruck[plot]"
+        ) from exc
+    return plt
+
+
+def plot_convergence(
+    results: Union[Result, Sequence[Result]],
+    *,
+    ax: Any = None,
+    labels: Optional[Sequence[str]] = None,
+    log: bool = False,
+) -> Any:
+    """Plot each result's ``history`` (score vs. iteration).
+
+    Draws onto ``ax`` (a matplotlib Axes) or a new figure's axes, and returns
+    the Axes — call ``plt.show()`` or ``ax.figure.savefig(...)`` yourself.
+
+    Parameters
+    ----------
+    results:
+        One result or several.
+    labels:
+        Legend labels; default to each result's ``method``.
+    log:
+        Log-scale the score axis (useful for errors that shrink by orders of
+        magnitude; scores must be positive).
+    """
+    plt = _pyplot()
+    runs = [results] if isinstance(results, Result) else list(results)
+    if labels is not None and len(labels) != len(runs):
+        raise ValueError(f"labels has {len(labels)} entries for {len(runs)} results")
+    if ax is None:
+        _, ax = plt.subplots()
+    for i, r in enumerate(runs):
+        label = labels[i] if labels is not None else (r.method or f"run {i + 1}")
+        ax.plot(range(len(r.history)), r.history, label=label)
+    ax.set_xlabel("iteration")
+    ax.set_ylabel("score")
+    if log:
+        ax.set_yscale("log")
+    if len(runs) > 1 or labels is not None:
+        ax.legend()
+    return ax
+
+
+def plot_pareto(
+    points: Sequence[Sequence[float]],
+    *,
+    front: Optional[Sequence[int]] = None,
+    ax: Any = None,
+    labels: tuple[str, str] = ("objective 1", "objective 2"),
+) -> Any:
+    """Scatter two-objective points, highlighting a Pareto front.
+
+    Parameters
+    ----------
+    points:
+        ``(objective 1, objective 2)`` pairs.
+    front:
+        Indices of the front members (e.g. from ``balance.pareto_front``);
+        drawn as a connected, highlighted line.
+    ax:
+        Axes to draw on; a new figure is made if omitted.
+    labels:
+        Axis labels.
+
+    Returns the matplotlib Axes.
+    """
+    plt = _pyplot()
+    if any(len(p) != 2 for p in points):
+        raise ValueError("plot_pareto needs exactly two objectives per point")
+    if ax is None:
+        _, ax = plt.subplots()
+    ax.scatter([p[0] for p in points], [p[1] for p in points], s=14, alpha=0.5, label="candidates")
+    if front:
+        pts = sorted((points[i] for i in front), key=lambda p: p[0])
+        ax.plot([p[0] for p in pts], [p[1] for p in pts], marker="o", label="Pareto front")
+        ax.legend()
+    ax.set_xlabel(labels[0])
+    ax.set_ylabel(labels[1])
+    return ax
